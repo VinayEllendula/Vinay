@@ -1,0 +1,68 @@
+On-Call Rotation Example Based on India and US Team Availability
+
+1. Overview
+This document outlines a practical on-call rotation strategy based on time-zone specific availability. The India team will cover on-call duties during their regular working hours, while the US team will manage alerts outside of these hours to ensure full 24/7 incident response coverage.
+
+2. India Team Coverage (Mon–Fri, 11:30 AM – 8:30 PM IST)
+During Indian working hours (Mon–Fri, 11:30 AM – 8:30 PM IST), the India team will handle on-call responsibilities.
+Team Members:
+- Vinay
+- Shashank
+
+A weekly rotation is used to alternate responsibilities between Vinay and Shashank. If neither responds within the defined time, escalation will be made to their manager, Abhilas.
+
+India Team Weekly On-Call Rotation
+Week
+
+Primary On-Call
+
+Backup
+
+Final Escalation
+
+1
+
+Vinay
+
+Shashank
+
+Abhilas
+
+2
+
+Shashank
+
+Vinay
+
+Abhilas
+
+3
+
+Vinay
+
+Shashank
+
+Abhilas
+
+3. US Team Coverage (Outside IST Hours & Weekends)
+The US team is responsible for covering all hours not handled by the India team:
+- Weekdays outside 11:30 AM – 8:30 PM IST
+- All weekends
+
+This ensures uninterrupted incident response and global coverage.
+
+4. Handoff & Escalation Strategy
+To ensure proper incident management across time zones:
+- PagerDuty schedules should be configured with time-based rules.
+- Escalation policy:
+ - During IST hours:
+   1. Escalate to India Primary
+   2. If no response, escalate to Backup
+   3. If still no response, escalate to Abhilas (Manager)
+ - Outside IST hours, escalate directly to US team
+- Handoff between shifts happens daily at 8:30 PM IST.
+
+5. Additional Notes
+- Update PagerDuty schedules regularly to reflect holidays and availability changes.
+- All users must configure their notification settings (push, SMS, phone call).
+- Regular test alerts should be conducted to ensure alert delivery and acknowledgement.
