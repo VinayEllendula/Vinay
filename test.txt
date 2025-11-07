@@ -1,0 +1,102 @@
+SELECT *
+FROM traces
+ 
+Query id: 4b8ef6ec-b05c-48e0-b63f-c7ad7198072f
+ 
+Row 1:                                                                                                                    
+──────
+id:          948c1223fe67df2462419c0e6edd648c
+timestamp:   2025-11-07 09:36:10.933
+name:        my_function
+user_id:     ᴺᵁᴸᴸ
+metadata:    {'resourceAttributes':'{"telemetry.sdk.language":"python","telemetry.sdk.name":"opentelemetry","telemetry.sdk.version":"1.38.0","service.name":"unknown_service"}','scope':'{"name":"langfuse-sdk","version":"3.9.1","attributes":{"public_key":"pk-lf-c7495ddb-6ab2-4337-89f8-860088f05a3e"}}'}
+release:     ᴺᵁᴸᴸ
+version:     ᴺᵁᴸᴸ
+project_id:  cmhonjecq0006qh0756fwrmgr
+environment: default
+public:      false
+bookmarked:  false
+tags:        []
+input:       {"args": [], "kwargs": {}}
+output:      Hello, world!
+session_id:  ᴺᵁᴸᴸ
+created_at:  2025-11-07 09:36:11.109
+updated_at:  2025-11-07 09:36:11.154
+event_ts:    2025-11-07 09:36:11.162
+is_deleted:  0
+
+
+
+
+SELECT *
+FROM observations
+ 
+Query id: 9dc9a133-fbe5-4641-b675-c3f4fb0bdb4e
+ 
+Row 1:                                                                                                                    
+──────
+id:                     f43f129b1a261a22
+trace_id:               948c1223fe67df2462419c0e6edd648c
+project_id:             cmhonjecq0006qh0756fwrmgr
+environment:            default
+type:                   SPAN
+parent_observation_id:  ᴺᵁᴸᴸ
+start_time:             2025-11-07 09:36:10.933
+end_time:               2025-11-07 09:36:10.933
+name:                   my_function
+metadata:               {'resourceAttributes':'{"telemetry.sdk.language":"python","telemetry.sdk.name":"opentelemetry","telemetry.sdk.version":"1.38.0","service.name":"unknown_service"}','scope':'{"name":"langfuse-sdk","version":"3.9.1","attributes":{"public_key":"pk-lf-c7495ddb-6ab2-4337-89f8-860088f05a3e"}}'}
+level:                  DEFAULT
+status_message:         ᴺᵁᴸᴸ
+version:                ᴺᵁᴸᴸ
+input:                  {"args": [], "kwargs": {}}
+output:                 Hello, world!
+provided_model_name:    ᴺᵁᴸᴸ
+internal_model_id:      ᴺᵁᴸᴸ
+model_parameters:       ᴺᵁᴸᴸ
+provided_usage_details: {}
+usage_details:          {}
+provided_cost_details:  {}
+cost_details:           {}
+total_cost:             ᴺᵁᴸᴸ
+completion_start_time:  ᴺᵁᴸᴸ
+prompt_id:              ᴺᵁᴸᴸ
+prompt_name:            ᴺᵁᴸᴸ
+prompt_version:         ᴺᵁᴸᴸ
+created_at:             2025-11-07 09:36:11.099
+updated_at:             2025-11-07 09:36:11.115
+event_ts:               2025-11-07 09:36:11.116
+is_deleted:             0
+
+
+
+SELECT *
+FROM scores
+ 
+Query id: 15d0903c-cfdd-42ba-aa04-a0f67c8afb24
+ 
+Row 1:                                                                                                    
+──────
+id:                 ae84417c1ff8f1f8
+timestamp:          2025-11-07 10:03:24.016
+project_id:         cmhonjecq0006qh0756fwrmgr
+environment:        default
+trace_id:           trace_id_here
+session_id:         ᴺᵁᴸᴸ
+dataset_run_id:     ᴺᵁᴸᴸ
+observation_id:     ᴺᵁᴸᴸ
+name:               testing
+value:              0.95
+source:             API
+comment:            ᴺᵁᴸᴸ
+metadata:           {}
+author_user_id:     ᴺᵁᴸᴸ
+config_id:          ᴺᵁᴸᴸ
+data_type:          NUMERIC
+string_value:       ᴺᵁᴸᴸ
+queue_id:           ᴺᵁᴸᴸ
+created_at:         2025-11-07 10:03:25.044
+updated_at:         2025-11-07 10:03:30.165
+event_ts:           2025-11-07 10:03:30.176
+is_deleted:         0
+execution_trace_id: ᴺᵁᴸᴸ
+
