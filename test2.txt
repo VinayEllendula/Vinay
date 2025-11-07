@@ -1,0 +1,143 @@
+SELECT *
+FROM observations
+WHERE trace_id = '6ec192b959451264561c833f64a77781'
+ 
+Query id: 8101cb04-3dcb-48c3-9b66-764f8533c43b
+ 
+Row 1:                                                                                                    
+──────
+id:                     593e5a447cc9b64e
+trace_id:               6ec192b959451264561c833f64a77781
+project_id:             cmhonjecq0006qh0756fwrmgr
+environment:            default
+type:                   SPAN
+parent_observation_id:  f071f65409e3c36d
+start_time:             2025-11-07 10:26:55.566
+end_time:               2025-11-07 10:26:55.566
+name:                   generate_response
+metadata:               {'resourceAttributes':'{"telemetry.sdk.language":"python","telemetry.sdk.name":"opentelemetry","telemetry.sdk.version":"1.38.0","service.name":"unknown_service"}','scope':'{"name":"langfuse-sdk","version":"3.9.1","attributes":{"public_key":"pk-lf-c7495ddb-6ab2-4337-89f8-860088f05a3e"}}'}      
+level:                  DEFAULT
+status_message:         ᴺᵁᴸᴸ
+version:                ᴺᵁᴸᴸ
+input:                  {"args": [["doc_1", "doc_2", "doc_3"]], "kwargs": {}}
+output:                 Used 3 docs to generate a funny cat joke.
+provided_model_name:    ᴺᵁᴸᴸ
+internal_model_id:      ᴺᵁᴸᴸ
+model_parameters:       ᴺᵁᴸᴸ
+provided_usage_details: {}
+usage_details:          {}
+provided_cost_details:  {}
+cost_details:           {}
+total_cost:             ᴺᵁᴸᴸ
+completion_start_time:  ᴺᵁᴸᴸ
+prompt_id:              ᴺᵁᴸᴸ
+prompt_name:            ᴺᵁᴸᴸ
+prompt_version:         ᴺᵁᴸᴸ
+created_at:             2025-11-07 10:26:55.637
+updated_at:             2025-11-07 10:26:55.651
+event_ts:               2025-11-07 10:26:55.651
+is_deleted:             0
+ 
+Row 2:
+──────
+id:                     9d2e1330911cfce5
+trace_id:               6ec192b959451264561c833f64a77781
+project_id:             cmhonjecq0006qh0756fwrmgr
+environment:            default
+type:                   SPAN
+parent_observation_id:  f071f65409e3c36d
+start_time:             2025-11-07 10:26:55.563
+end_time:               2025-11-07 10:26:55.566
+name:                   retrieve_context
+metadata:               {'resourceAttributes':'{"telemetry.sdk.language":"python","telemetry.sdk.name":"opentelemetry","telemetry.sdk.version":"1.38.0","service.name":"unknown_service"}','scope':'{"name":"langfuse-sdk","version":"3.9.1","attributes":{"public_key":"pk-lf-c7495ddb-6ab2-4337-89f8-860088f05a3e"}}'}      
+level:                  DEFAULT
+status_message:         ᴺᵁᴸᴸ
+version:                ᴺᵁᴸᴸ
+input:                  {"args": [], "kwargs": {}}
+output:                 ["doc_1", "doc_2", "doc_3"]
+provided_model_name:    ᴺᵁᴸᴸ
+internal_model_id:      ᴺᵁᴸᴸ
+model_parameters:       ᴺᵁᴸᴸ
+provided_usage_details: {}
+usage_details:          {}
+provided_cost_details:  {}
+cost_details:           {}
+total_cost:             ᴺᵁᴸᴸ
+completion_start_time:  ᴺᵁᴸᴸ
+prompt_id:              ᴺᵁᴸᴸ
+prompt_name:            ᴺᵁᴸᴸ
+prompt_version:         ᴺᵁᴸᴸ
+created_at:             2025-11-07 10:26:55.637
+updated_at:             2025-11-07 10:26:55.653
+event_ts:               2025-11-07 10:26:55.653
+is_deleted:             0
+ 
+Row 3:
+──────
+id:                     e6c62b9884da737c
+trace_id:               6ec192b959451264561c833f64a77781
+project_id:             cmhonjecq0006qh0756fwrmgr
+environment:            default
+type:                   SPAN
+parent_observation_id:  f071f65409e3c36d
+start_time:             2025-11-07 10:26:55.567
+end_time:               2025-11-07 10:26:55.567
+name:                   postprocess_output
+metadata:               {'resourceAttributes':'{"telemetry.sdk.language":"python","telemetry.sdk.name":"opentelemetry","telemetry.sdk.version":"1.38.0","service.name":"unknown_service"}','scope':'{"name":"langfuse-sdk","version":"3.9.1","attributes":{"public_key":"pk-lf-c7495ddb-6ab2-4337-89f8-860088f05a3e"}}'}      
+level:                  DEFAULT
+status_message:         ᴺᵁᴸᴸ
+version:                ᴺᵁᴸᴸ
+input:                  {"args": ["Used 3 docs to generate a funny cat joke."], "kwargs": {}}
+output:                 USED 3 DOCS TO GENERATE A FUNNY CAT JOKE.
+provided_model_name:    ᴺᵁᴸᴸ
+internal_model_id:      ᴺᵁᴸᴸ
+model_parameters:       ᴺᵁᴸᴸ
+provided_usage_details: {}
+usage_details:          {}
+provided_cost_details:  {}
+cost_details:           {}
+total_cost:             ᴺᵁᴸᴸ
+completion_start_time:  ᴺᵁᴸᴸ
+prompt_id:              ᴺᵁᴸᴸ
+prompt_name:            ᴺᵁᴸᴸ
+prompt_version:         ᴺᵁᴸᴸ
+created_at:             2025-11-07 10:26:55.637
+updated_at:             2025-11-07 10:26:55.654
+event_ts:               2025-11-07 10:26:55.654
+is_deleted:             0
+ 
+Row 4:
+──────
+id:                     f071f65409e3c36d
+trace_id:               6ec192b959451264561c833f64a77781
+project_id:             cmhonjecq0006qh0756fwrmgr
+environment:            default
+type:                   SPAN
+parent_observation_id:  ᴺᵁᴸᴸ
+start_time:             2025-11-07 10:26:55.563
+end_time:               2025-11-07 10:26:55.567
+name:                   user_request_flow
+metadata:               {'resourceAttributes':'{"telemetry.sdk.language":"python","telemetry.sdk.name":"opentelemetry","telemetry.sdk.version":"1.38.0","service.name":"unknown_service"}','scope':'{"name":"langfuse-sdk","version":"3.9.1","attributes":{"public_key":"pk-lf-c7495ddb-6ab2-4337-89f8-860088f05a3e"}}'}      
+level:                  DEFAULT
+status_message:         ᴺᵁᴸᴸ
+version:                ᴺᵁᴸᴸ
+input:                  {"args": [], "kwargs": {}}
+output:                 USED 3 DOCS TO GENERATE A FUNNY CAT JOKE.
+provided_model_name:    ᴺᵁᴸᴸ
+internal_model_id:      ᴺᵁᴸᴸ
+model_parameters:       ᴺᵁᴸᴸ
+provided_usage_details: {}
+usage_details:          {}
+provided_cost_details:  {}
+cost_details:           {}
+total_cost:             ᴺᵁᴸᴸ
+completion_start_time:  ᴺᵁᴸᴸ
+prompt_id:              ᴺᵁᴸᴸ
+prompt_name:            ᴺᵁᴸᴸ
+prompt_version:         ᴺᵁᴸᴸ
+created_at:             2025-11-07 10:26:55.637
+updated_at:             2025-11-07 10:26:55.655
+event_ts:               2025-11-07 10:26:55.655
+is_deleted:             0
+ 
+4 rows in set. Elapsed: 0.005 sec.
