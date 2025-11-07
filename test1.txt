@@ -1,0 +1,160 @@
+┌─statement──────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
+1. │ CREATE TABLE default.scores                                                                          
+                 ↴│
+   │↳(                                                                                                    
+                 ↴│
+   │↳    `id` String,                                                                                     
+                 ↴│
+   │↳    `timestamp` DateTime64(3),                                                                       
+                 ↴│
+   │↳    `project_id` String,                                                                             
+                 ↴│
+   │↳    `environment` LowCardinality(String) DEFAULT 'default',                                          
+                 ↴│
+   │↳    `trace_id` Nullable(String),                                                                     
+                 ↴│
+   │↳    `session_id` Nullable(String),                                                                   
+                 ↴│
+   │↳    `dataset_run_id` Nullable(String),                                                               
+                 ↴│
+   │↳    `observation_id` Nullable(String),                                                               
+                 ↴│
+   │↳    `name` String,                                                                                   
+                 ↴│
+   │↳    `value` Float64,                                                                                 
+                 ↴│
+   │↳    `source` String,                                                                                 
+                 ↴│
+   │↳    `comment` Nullable(String) CODEC(ZSTD(1)),                                                       
+                 ↴│
+   │↳    `metadata` Map(LowCardinality(String), String),                                                  
+                 ↴│
+   │↳    `author_user_id` Nullable(String),                                                               
+                 ↴│
+   │↳    `config_id` Nullable(String),                                                                    
+                 ↴│
+   │↳    `data_type` String,                                                                              
+                 ↴│
+   │↳    `string_value` Nullable(String),                                                                 
+                 ↴│
+   │↳    `queue_id` Nullable(String),                                                                     
+                 ↴│
+   │↳    `created_at` DateTime64(3) DEFAULT now(),                                                        
+                 ↴│
+   │↳    `updated_at` DateTime64(3) DEFAULT now(),                                                        
+                 ↴│
+   │↳    `event_ts` DateTime64(3),                                                                        
+                 ↴│
+   │↳    `is_deleted` UInt8,                                                                              
+                 ↴│
+   │↳    `execution_trace_id` Nullable(String),                                                           
+                 ↴│
+   │↳    INDEX idx_id id TYPE bloom_filter(0.001) GRANULARITY 1,                                          
+                 ↴│
+   │↳    INDEX idx_project_trace_observation (project_id, trace_id, observation_id) TYPE bloom_filter(0.001) GRANULARITY 1,↴│
+   │↳    INDEX idx_project_session (project_id, session_id) TYPE bloom_filter(0.001) GRANULARITY 1,       
+                 ↴│
+   │↳    INDEX idx_project_dataset_run (project_id, dataset_run_id) TYPE bloom_filter(0.001) GRANULARITY 1
+                 ↴│
+   │↳)                                                                                                    
+                 ↴│
+   │↳ENGINE = ReplacingMergeTree(event_ts, is_deleted)                                                    
+                 ↴│
+   │↳PARTITION BY toYYYYMM(timestamp)                                                                     
+                 ↴│
+   │↳PRIMARY KEY (project_id, toDate(timestamp), name)                                                    
+                 ↴│
+   │↳ORDER BY (project_id, toDate(timestamp), name, id)                                                   
+                 ↴│
+   │↳SETTINGS index_granularity = 8192                                                                    
+                  │
+   └────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+
+
+SHOW CREATE TABLE traces
+ 
+Query id: 7c4d5f28-7a9b-4bce-9368-1875983f24ae
+ 
+   ┌─statement───────────────────────────────────────────────────────────────────────────────────┐        
+1. │ CREATE TABLE default.traces                                                                ↴│        
+   │↳(                                                                                          ↴│        
+   │↳    `id` String,                                                                           ↴│        
+   │↳    `timestamp` DateTime64(3),                                                             ↴│        
+   │↳    `name` String,                                                                         ↴│        
+   │↳    `user_id` Nullable(String),                                                            ↴│        
+   │↳    `metadata` Map(LowCardinality(String), String),                                        ↴│        
+   │↳    `release` Nullable(String),                                                            ↴│        
+   │↳    `version` Nullable(String),                                                            ↴│        
+   │↳    `project_id` String,                                                                   ↴│        
+   │↳    `environment` LowCardinality(String) DEFAULT 'default',                                ↴│        
+   │↳    `public` Bool,                                                                         ↴│        
+   │↳    `bookmarked` Bool,                                                                     ↴│        
+   │↳    `tags` Array(String),                                                                  ↴│        
+   │↳    `input` Nullable(String) CODEC(ZSTD(3)),                                               ↴│        
+   │↳    `output` Nullable(String) CODEC(ZSTD(3)),                                              ↴│        
+   │↳    `session_id` Nullable(String),                                                         ↴│        
+   │↳    `created_at` DateTime64(3) DEFAULT now(),                                              ↴│        
+   │↳    `updated_at` DateTime64(3) DEFAULT now(),                                              ↴│        
+   │↳    `event_ts` DateTime64(3),                                                              ↴│        
+   │↳    `is_deleted` UInt8,                                                                    ↴│        
+   │↳    INDEX idx_id id TYPE bloom_filter(0.001) GRANULARITY 1,                                ↴│        
+   │↳    INDEX idx_res_metadata_key mapKeys(metadata) TYPE bloom_filter(0.01) GRANULARITY 1,    ↴│        
+   │↳    INDEX idx_res_metadata_value mapValues(metadata) TYPE bloom_filter(0.01) GRANULARITY 1,↴│        
+   │↳    INDEX idx_session_id session_id TYPE bloom_filter() GRANULARITY 1,                     ↴│        
+   │↳    INDEX idx_user_id user_id TYPE bloom_filter() GRANULARITY 1                            ↴│        
+   │↳)                                                                                          ↴│        
+   │↳ENGINE = ReplacingMergeTree(event_ts, is_deleted)                                          ↴│        
+   │↳PARTITION BY toYYYYMM(timestamp)                                                           ↴│        
+   │↳PRIMARY KEY (project_id, toDate(timestamp))                                                ↴│        
+   │↳ORDER BY (project_id, toDate(timestamp), id)                                               ↴│        
+   │↳SETTINGS index_granularity = 8192                                                           │        
+   └─────────────────────────────────────────────────────────────────────────────────────────────┘
+
+
+
+┌─statement──────────────────────────────────────────────────────────────────────────────────┐         
+1. │ CREATE TABLE default.observations                                                         ↴│
+   │↳(                                                                                         ↴│
+   │↳    `id` String,                                                                          ↴│
+   │↳    `trace_id` String,                                                                    ↴│
+   │↳    `project_id` String,                                                                  ↴│
+   │↳    `environment` LowCardinality(String) DEFAULT 'default',                               ↴│
+   │↳    `type` LowCardinality(String),                                                        ↴│
+   │↳    `parent_observation_id` Nullable(String),                                             ↴│
+   │↳    `start_time` DateTime64(3),                                                           ↴│
+   │↳    `end_time` Nullable(DateTime64(3)),                                                   ↴│
+   │↳    `name` String,                                                                        ↴│
+   │↳    `metadata` Map(LowCardinality(String), String),                                       ↴│
+   │↳    `level` LowCardinality(String),                                                       ↴│
+   │↳    `status_message` Nullable(String),                                                    ↴│
+   │↳    `version` Nullable(String),                                                           ↴│
+   │↳    `input` Nullable(String) CODEC(ZSTD(3)),                                              ↴│
+   │↳    `output` Nullable(String) CODEC(ZSTD(3)),                                             ↴│
+   │↳    `provided_model_name` Nullable(String),                                               ↴│
+   │↳    `internal_model_id` Nullable(String),                                                 ↴│
+   │↳    `model_parameters` Nullable(String),                                                  ↴│
+   │↳    `provided_usage_details` Map(LowCardinality(String), UInt64),                         ↴│
+   │↳    `usage_details` Map(LowCardinality(String), UInt64),                                  ↴│
+   │↳    `provided_cost_details` Map(LowCardinality(String), Decimal(18, 12)),                 ↴│
+   │↳    `cost_details` Map(LowCardinality(String), Decimal(18, 12)),                          ↴│
+   │↳    `total_cost` Nullable(Decimal(18, 12)),                                               ↴│
+   │↳    `completion_start_time` Nullable(DateTime64(3)),                                      ↴│
+   │↳    `prompt_id` Nullable(String),                                                         ↴│
+   │↳    `prompt_name` Nullable(String),                                                       ↴│
+   │↳    `prompt_version` Nullable(UInt16),                                                    ↴│
+   │↳    `created_at` DateTime64(3) DEFAULT now(),                                             ↴│
+   │↳    `updated_at` DateTime64(3) DEFAULT now(),                                             ↴│
+   │↳    `event_ts` DateTime64(3),                                                             ↴│
+   │↳    `is_deleted` UInt8,                                                                   ↴│
+   │↳    INDEX idx_id id TYPE bloom_filter() GRANULARITY 1,                                    ↴│
+   │↳    INDEX idx_trace_id trace_id TYPE bloom_filter() GRANULARITY 1,                        ↴│
+   │↳    INDEX idx_res_metadata_key mapKeys(metadata) TYPE bloom_filter(0.01) GRANULARITY 1,   ↴│
+   │↳    INDEX idx_res_metadata_value mapValues(metadata) TYPE bloom_filter(0.01) GRANULARITY 1↴│
+   │↳)                                                                                         ↴│
+   │↳ENGINE = ReplacingMergeTree(event_ts, is_deleted)                                         ↴│
+   │↳PARTITION BY toYYYYMM(start_time)                                                         ↴│
+   │↳PRIMARY KEY (project_id, type, toDate(start_time))                                        ↴│
+   │↳ORDER BY (project_id, type, toDate(start_time), id)                                       ↴│
+   │↳SETTINGS index_granularity = 8192                                                          │
+   └────────────────────────────────
+
