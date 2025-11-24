@@ -1,0 +1,830 @@
+import { type z } from "zod/v4";
+import {
+  FilterList,
+  createFilterFromFilterState,
+} from "@langfuse/shared/src/server";
+import {
+  type QueryType,
+  type ViewDeclarationType,
+  type views,
+  query as queryModel,
+  type metricAggregations,
+  type granularities,
+} from "../types";
+import { viewDeclarations } from "@/src/features/query/dataModel";
+import { InvalidRequestError } from "@langfuse/shared";
+
+type AppliedDimensionType = {
+  table: string;
+  sql: string;
+  alias?: string;
+  relationTable?: string;
+};
+
+type AppliedMetricType = {
+  sql: string;
+  aggregation: z.infer<typeof metricAggregations>;
+  alias?: string;
+  relationTable?: string;
+};
+
+export class QueryBuilder {
+  private chartConfig?: { bins?: number; row_limit?: number };
+
+  constructor(chartConfig?: { bins?: number; row_limit?: number }) {
+    this.chartConfig = chartConfig;
+  }
+
+  /**
+   * Redshift aggregation translation.
+   *
+   * Note:
+   * - Percentiles use Redshift's PERCENTILE_CONT aggregate:
+   *   PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY expr)
+   * - Histogram is not directly supported in Redshift like ClickHouse's histogram().
+   */
+  private translateAggregation(metric: AppliedMetricType): string {
+    const expr = metric.alias || metric.sql;
+
+    switch (metric.aggregation) {
+      case "sum":
+        return `SUM(${expr})`;
+      case "avg":
+        return `AVG(${expr})`;
+      case "count":
+        return `COUNT(${expr})`;
+      case "max":
+        return `MAX(${expr})`;
+      case "min":
+        return `MIN(${expr})`;
+      case "p50":
+        return `PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY ${expr})`;
+      case "p75":
+        return `PERCENTILE_CONT(0.75) WITHIN GROUP (ORDER BY ${expr})`;
+      case "p90":
+        return `PERCENTILE_CONT(0.9) WITHIN GROUP (ORDER BY ${expr})`;
+      case "p95":
+        return `PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY ${expr})`;
+      case "p99":
+        return `PERCENTILE_CONT(0.99) WITHIN GROUP (ORDER BY ${expr})`;
+      case "histogram": {
+        // Redshift has no built-in histogram aggregate analogous to ClickHouse's histogram().
+        // Best handled in application code or via a custom numbers table / bucketing query.
+        throw new InvalidRequestError(
+          "Histogram aggregation is not supported on Redshift. Compute histograms in application code instead.",
+        );
+      }
+      default: {
+        // eslint-disable-next-line @typescript-eslint/no-unused-vars
+        const exhaustiveCheck: never = metric.aggregation;
+        throw new InvalidRequestError(
+          `Invalid aggregation: ${metric.aggregation}`,
+        );
+      }
+    }
+  }
+
+  private getViewDeclaration(
+    viewName: z.infer<typeof views>,
+  ): ViewDeclarationType {
+    if (!(viewName in viewDeclarations)) {
+      throw new InvalidRequestError(
+        `Invalid view. Must be one of ${Object.keys(viewDeclarations)}`,
+      );
+    }
+    return viewDeclarations[viewName];
+  }
+
+  private mapDimensions(
+    dimensions: Array<{ field: string }>,
+    view: ViewDeclarationType,
+  ): AppliedDimensionType[] {
+    return dimensions.map((dimension) => {
+      if (!(dimension.field in view.dimensions)) {
+        throw new InvalidRequestError(
+          `Invalid dimension ${dimension.field}. Must be one of ${Object.keys(view.dimensions)}`,
+        );
+      }
+      const dim = view.dimensions[dimension.field];
+      return { ...dim, table: dim.relationTable || view.name };
+    });
+  }
+
+  private mapMetrics(
+    metrics: Array<{
+      measure: string;
+      aggregation: z.infer<typeof metricAggregations>;
+    }>,
+    view: ViewDeclarationType,
+  ): AppliedMetricType[] {
+    return metrics.map((metric) => {
+      if (!(metric.measure in view.measures)) {
+        throw new InvalidRequestError(
+          `Invalid metric ${metric.measure}. Must be one of ${Object.keys(view.measures)}`,
+        );
+      }
+      return {
+        ...view.measures[metric.measure],
+        aggregation: metric.aggregation,
+      };
+    });
+  }
+
+  private validateFilters(
+    filters: z.infer<typeof queryModel>["filters"],
+    view: ViewDeclarationType,
+  ) {
+    for (const filter of filters) {
+      // Validate filters on dimension fields
+      if (filter.column in view.dimensions) {
+        const dimension = view.dimensions[filter.column];
+
+        // Array fields (like tags) validation
+        if (dimension.type === "string[]") {
+          if (filter.type === "string") {
+            throw new InvalidRequestError(
+              `Invalid filter for field '${filter.column}': Array fields require type 'arrayOptions', not 'string'. ` +
+                `Use operators like 'any of', 'all of', or 'none of' with an array of values.`,
+            );
+          }
+
+          // Additional validation: ensure value is array for arrayOptions
+          if (filter.type === "arrayOptions" && !Array.isArray(filter.value)) {
+            throw new InvalidRequestError(
+              `Invalid filter for field '${filter.column}': arrayOptions type requires an array of values, not '${typeof filter.value}'.`,
+            );
+          }
+        }
+      }
+
+      // Special validation for metadata filters
+      else if (filter.column === "metadata") {
+        if (filter.type !== "stringObject") {
+          throw new InvalidRequestError(
+            `Invalid filter for field 'metadata': Metadata filters require type 'stringObject' with a 'key' property, not '${filter.type}'. ` +
+              `Example: {"column": "metadata", "type": "stringObject", "key": "environment", "operator": "=", "value": "production"}`,
+          );
+        }
+
+        // Validate stringObject has required key
+        if (filter.type === "stringObject" && !("key" in filter)) {
+          throw new InvalidRequestError(
+            `Invalid filter for field 'metadata': stringObject type requires a 'key' property to specify which metadata field to filter on. ` +
+              `Example: {"column": "metadata", "type": "stringObject", "key": "environment", "operator": "=", "value": "production"}`,
+          );
+        }
+
+        // Validate stringObject value type
+        if (
+          filter.type === "stringObject" &&
+          typeof filter.value !== "string"
+        ) {
+          throw new InvalidRequestError(
+            // @ts-ignore
+            `Invalid filter for field 'metadata': stringObject type requires a string value, not '${typeof filter.value}'.`,
+          );
+        }
+      }
+    }
+  }
+
+  private mapFilters(
+    filters: z.infer<typeof queryModel>["filters"],
+    view: ViewDeclarationType,
+  ) {
+    // Validate all filters before processing
+    this.validateFilters(filters, view);
+
+    // Transform our filters to match the column mapping format expected by createFilterFromFilterState
+    const columnMappings = filters.map((filter) => {
+      let clickhouseSelect: string;
+      let queryPrefix = "";
+      let clickhouseTableName: string = view.name;
+      let type: string;
+
+      if (filter.column in view.dimensions) {
+        const dimension = view.dimensions[filter.column];
+        clickhouseSelect = dimension.sql;
+        type = "string";
+        if (dimension.relationTable) {
+          clickhouseTableName = dimension.relationTable;
+        }
+      } else if (filter.column === view.timeDimension) {
+        clickhouseSelect = view.timeDimension;
+        queryPrefix = clickhouseTableName;
+        type = "datetime";
+      } else if (filter.column === "metadata") {
+        clickhouseSelect = "metadata";
+        queryPrefix = clickhouseTableName;
+        type = "stringObject";
+      } else if (filter.column.endsWith("Name")) {
+        // Fallback for buggy filters like scoreName instead of name
+        clickhouseSelect = "name";
+        queryPrefix = clickhouseTableName;
+        type = "string";
+      } else {
+        throw new InvalidRequestError(
+          `Invalid filter column ${filter.column}. Must be one of ${Object.keys(view.dimensions)} or ${view.timeDimension}`,
+        );
+      }
+
+      return {
+        uiTableName: filter.column,
+        uiTableId: filter.column,
+        clickhouseTableName,
+        clickhouseSelect,
+        queryPrefix,
+        type,
+      };
+    });
+
+    // Use the createFilterFromFilterState function to create proper SQL filters
+    return createFilterFromFilterState(filters, columnMappings);
+  }
+
+  private addStandardFilters(
+    filterList: FilterList,
+    view: ViewDeclarationType,
+    projectId: string,
+    fromTimestamp: string,
+    toTimestamp: string,
+  ) {
+    const projectIdMapping = {
+      uiTableName: "project_id",
+      uiTableId: "project_id",
+      clickhouseTableName: view.name,
+      clickhouseSelect: "project_id",
+      queryPrefix: view.name,
+      type: "string",
+    };
+
+    const timeDimensionMapping = {
+      uiTableName: view.timeDimension,
+      uiTableId: view.timeDimension,
+      clickhouseTableName: view.name,
+      clickhouseSelect: view.timeDimension,
+      queryPrefix: view.name,
+      type: "datetime",
+    };
+
+    const projectIdFilter = createFilterFromFilterState(
+      [
+        {
+          column: "project_id",
+          operator: "=",
+          value: projectId,
+          type: "string",
+        },
+      ],
+      [projectIdMapping],
+    );
+
+    const fromFilter = createFilterFromFilterState(
+      [
+        {
+          column: view.timeDimension,
+          operator: ">=",
+          value: new Date(fromTimestamp),
+          type: "datetime",
+        },
+      ],
+      [timeDimensionMapping],
+    );
+
+    const toFilter = createFilterFromFilterState(
+      [
+        {
+          column: view.timeDimension,
+          operator: "<=",
+          value: new Date(toTimestamp),
+          type: "datetime",
+        },
+      ],
+      [timeDimensionMapping],
+    );
+
+    filterList.push(...projectIdFilter, ...fromFilter, ...toFilter);
+
+    // Add segment filters if any
+    if (view.segments.length > 0) {
+      const segmentsMappings = view.segments.map((segment) => ({
+        uiTableName: segment.column,
+        uiTableId: segment.column,
+        clickhouseTableName: view.name,
+        clickhouseSelect: segment.column,
+        queryPrefix: view.name,
+        type: segment.type,
+      }));
+
+      const segmentFilters = createFilterFromFilterState(
+        view.segments,
+        segmentsMappings,
+      );
+      filterList.push(...segmentFilters);
+    }
+
+    return filterList;
+  }
+
+  private collectRelationTables(
+    view: ViewDeclarationType,
+    appliedDimensions: AppliedDimensionType[],
+    appliedMetrics: AppliedMetricType[],
+    filters: FilterList,
+  ) {
+    const relationTables = new Set<string>();
+    appliedDimensions.forEach((dimension) => {
+      if (dimension.relationTable) {
+        relationTables.add(dimension.relationTable);
+      }
+    });
+    appliedMetrics.forEach((metric) => {
+      if (metric.relationTable) {
+        relationTables.add(metric.relationTable);
+      }
+    });
+    filters.forEach((filter) => {
+      if (filter.clickhouseTable !== view.name) {
+        relationTables.add(filter.clickhouseTable);
+      }
+    });
+    return relationTables;
+  }
+
+  private buildJoins(
+    relationTables: Set<string>,
+    view: ViewDeclarationType,
+    filterList: FilterList,
+    query: QueryType,
+  ) {
+    const relationJoins: string[] = [];
+
+    for (const relationTableName of relationTables) {
+      if (!(relationTableName in view.tableRelations)) {
+        throw new InvalidRequestError(
+          `Invalid relationTable: ${relationTableName}. Must be one of ${Object.keys(view.tableRelations)}`,
+        );
+      }
+
+      const relation = view.tableRelations[relationTableName];
+
+      // Redshift has no FINAL modifier; simple LEFT JOIN.
+      const joinStatement = `LEFT JOIN ${relation.name} ${relation.joinConditionSql}`;
+
+      // Relation-specific timestamp filters
+      const relationTimeDimensionMapping = {
+        uiTableName: relation.timeDimension,
+        uiTableId: relation.timeDimension,
+        clickhouseTableName: relation.name,
+        clickhouseSelect: relation.timeDimension,
+        queryPrefix: relation.name,
+        type: "datetime",
+      };
+
+      const fromFilter = createFilterFromFilterState(
+        [
+          {
+            column: relation.timeDimension,
+            operator: ">=",
+            value: new Date(query.fromTimestamp),
+            type: "datetime",
+          },
+        ],
+        [relationTimeDimensionMapping],
+      );
+
+      const toFilter = createFilterFromFilterState(
+        [
+          {
+            column: relation.timeDimension,
+            operator: "<=",
+            value: new Date(query.toTimestamp),
+            type: "datetime",
+          },
+        ],
+        [relationTimeDimensionMapping],
+      );
+
+      filterList.push(...fromFilter, ...toFilter);
+
+      relationJoins.push(joinStatement);
+    }
+    return relationJoins;
+  }
+
+  private buildWhereClause(
+    filterList: FilterList,
+    parameters: Record<string, unknown>,
+  ) {
+    if (filterList.length() === 0) return "";
+
+    const { query, params } = filterList.apply();
+
+    Object.assign(parameters, params);
+
+    return ` WHERE ${query}`;
+  }
+
+  private determineTimeGranularity(
+    fromTimestamp: string,
+    toTimestamp: string,
+  ): z.infer<typeof granularities> {
+    const from = new Date(fromTimestamp);
+    const to = new Date(toTimestamp);
+    const diffMs = to.getTime() - from.getTime();
+    const diffHours = diffMs / (1000 * 60 * 60);
+
+    if (diffHours < 2) {
+      return "minute";
+    } else if (diffHours < 72) {
+      return "hour";
+    } else if (diffHours < 1440) {
+      return "day";
+    } else if (diffHours < 8760) {
+      return "week";
+    } else {
+      return "month";
+    }
+  }
+
+  /**
+   * Redshift time bucketing using DATE_TRUNC.
+   */
+  private getTimeDimensionSql(
+    sql: string,
+    granularity: z.infer<typeof granularities>,
+  ): string {
+    switch (granularity) {
+      case "minute":
+        return `DATE_TRUNC('minute', ${sql})`;
+      case "hour":
+        return `DATE_TRUNC('hour', ${sql})`;
+      case "day":
+        return `DATE_TRUNC('day', ${sql})`;
+      case "week":
+        return `DATE_TRUNC('week', ${sql})`;
+      case "month":
+        return `DATE_TRUNC('month', ${sql})`;
+      case "auto":
+        throw new Error(
+          `Granularity 'auto' is not supported for getTimeDimensionSql`,
+        );
+      default: {
+        // eslint-disable-next-line @typescript-eslint/no-unused-vars
+        const exhaustiveCheck: never = granularity;
+        throw new InvalidRequestError(
+          `Invalid time granularity: ${granularity}. Must be one of minute, hour, day, week, month`,
+        );
+      }
+    }
+  }
+
+  private buildInnerDimensionsPart(
+    appliedDimensions: AppliedDimensionType[],
+    query: QueryType,
+    view: ViewDeclarationType,
+  ) {
+    let dimensions = "";
+
+    if (appliedDimensions.length > 0) {
+      dimensions += `${appliedDimensions
+        .map(
+          (dimension) =>
+            `ANY_VALUE(${dimension.sql}) AS ${dimension.alias ?? dimension.sql}`,
+        )
+        .join(",\n")},`;
+    }
+
+    if (query.timeDimension) {
+      const granularity =
+        query.timeDimension.granularity === "auto"
+          ? this.determineTimeGranularity(
+              query.fromTimestamp,
+              query.toTimestamp,
+            )
+          : query.timeDimension.granularity;
+
+      const timeDimensionSql = this.getTimeDimensionSql(
+        `${view.name}.${view.timeDimension}`,
+        granularity,
+      );
+
+      // We still use ANY_VALUE here to collapse multiple rows per entity into a single bucket.
+      dimensions += `ANY_VALUE(${timeDimensionSql}) AS time_dimension,`;
+    }
+
+    return dimensions;
+  }
+
+  private buildInnerMetricsPart(appliedMetrics: AppliedMetricType[]) {
+    return appliedMetrics.length > 0
+      ? `${appliedMetrics
+          .map(
+            (metric) => `${metric.sql} AS ${metric.alias || metric.sql}`,
+          )
+          .join(",\n")}`
+      : "COUNT(*) AS count";
+  }
+
+  private buildInnerSelect(
+    view: ViewDeclarationType,
+    innerDimensionsPart: string,
+    innerMetricsPart: string,
+    fromClause: string,
+  ) {
+    return `
+      SELECT
+        ${view.name}.project_id,
+        ${view.name}.id,
+        ${innerDimensionsPart}
+        ${innerMetricsPart}
+        ${fromClause}
+      GROUP BY ${view.name}.project_id, ${view.name}.id`;
+  }
+
+  private buildOuterDimensionsPart(
+    appliedDimensions: AppliedDimensionType[],
+    hasTimeDimension: boolean,
+  ) {
+    let dimensions = "";
+
+    if (appliedDimensions.length > 0) {
+      dimensions += `${appliedDimensions
+        .map(
+          (dimension) =>
+            `${dimension.alias ?? dimension.sql} AS ${dimension.alias || dimension.sql}`,
+        )
+        .join(",\n")},`;
+    }
+
+    if (hasTimeDimension) {
+      dimensions += `time_dimension,`;
+    }
+
+    return dimensions;
+  }
+
+  private buildOuterMetricsPart(appliedMetrics: AppliedMetricType[]) {
+    return appliedMetrics.length > 0
+      ? `${appliedMetrics
+          .map(
+            (metric) =>
+              `${this.translateAggregation(metric)} AS ${
+                metric.aggregation
+              }_${metric.alias || metric.sql}`,
+          )
+          .join(",\n")}`
+      : "COUNT(*) AS count";
+  }
+
+  private buildGroupByClause(
+    appliedDimensions: AppliedDimensionType[],
+    hasTimeDimension: boolean,
+  ) {
+    const dimensions: string[] = [];
+
+    if (appliedDimensions.length > 0) {
+      dimensions.push(
+        ...appliedDimensions.map(
+          (dimension) => dimension.alias ?? dimension.sql,
+        ),
+      );
+    }
+
+    if (hasTimeDimension) {
+      dimensions.push("time_dimension");
+    }
+
+    return dimensions.length > 0 ? `GROUP BY ${dimensions.join(",\n")}` : "";
+  }
+
+  /**
+   * Redshift has no WITH FILL equivalent.
+   *
+   * We return an empty string here and recommend doing zero-filling / gap-filling
+   * in the application layer or via a dates/numbers table if needed.
+   */
+  private buildWithFillClause(
+    _timeDimension: {
+      granularity: z.infer<typeof granularities>;
+    } | null,
+    _fromTimestamp: string,
+    _toTimestamp: string,
+    _orderBy: Array<{ field: string; direction: string }> | null,
+    _parameters: Record<string, unknown>,
+  ): string {
+    return "";
+  }
+
+  private buildOuterSelect(
+    outerDimensionsPart: string,
+    outerMetricsPart: string,
+    innerQuery: string,
+    groupByClause: string,
+    orderByClause: string,
+    withFillClause: string,
+  ) {
+    return `
+      SELECT
+        ${outerDimensionsPart}
+        ${outerMetricsPart}
+      FROM (${innerQuery}) AS inner_query
+      ${groupByClause}
+      ${orderByClause}
+      ${withFillClause}`;
+  }
+
+  private validateAndProcessOrderBy(
+    orderBy: Array<{ field: string; direction: string }> | null,
+    appliedDimensions: AppliedDimensionType[],
+    appliedMetrics: AppliedMetricType[],
+    hasTimeDimension: boolean,
+  ): Array<{ field: string; direction: string }> {
+    if (!orderBy || orderBy.length === 0) {
+      if (hasTimeDimension) {
+        return [{ field: "time_dimension", direction: "asc" }];
+      } else if (appliedMetrics.length > 0) {
+        const firstMetric = appliedMetrics[0];
+        return [
+          {
+            field: `${firstMetric.aggregation}_${firstMetric.alias || firstMetric.sql}`,
+            direction: "desc",
+          },
+        ];
+      } else if (appliedDimensions.length > 0) {
+        const firstDimension = appliedDimensions[0];
+        return [
+          {
+            field: firstDimension.alias || firstDimension.sql,
+            direction: "asc",
+          },
+        ];
+      }
+      return [];
+    }
+
+    return orderBy.map((item) => {
+      if (hasTimeDimension && item.field === "time_dimension") {
+        return item;
+      }
+
+      const matchingDimension = appliedDimensions.find(
+        (dim) => dim.alias === item.field || dim.sql === item.field,
+      );
+      if (matchingDimension) {
+        return {
+          field: matchingDimension.alias || matchingDimension.sql,
+          direction: item.direction,
+        };
+      }
+
+      const metricNamePattern =
+        /^(sum|avg|count|max|min|p50|p75|p90|p95|p99)_(.+)$/;
+      const metricMatch = item.field.match(metricNamePattern);
+
+      if (metricMatch) {
+        const [, aggregation, measureName] = metricMatch;
+        const matchingMetric = appliedMetrics.find(
+          (metric) =>
+            (metric.alias === measureName || metric.sql === measureName) &&
+            metric.aggregation === aggregation,
+        );
+
+        if (matchingMetric) {
+          return item;
+        }
+      }
+
+      throw new InvalidRequestError(
+        `Invalid orderBy field: ${item.field}. Must be one of the dimension or metric fields.`,
+      );
+    });
+  }
+
+  private buildOrderByClause(
+    processedOrderBy: Array<{ field: string; direction: string }>,
+  ): string {
+    if (processedOrderBy.length === 0) {
+      return "";
+    }
+
+    return `ORDER BY ${processedOrderBy
+      .map((item) => `${item.field} ${item.direction}`)
+      .join(", ")}`;
+  }
+
+  public async build(
+    query: QueryType,
+    projectId: string,
+  ): Promise<{ query: string; parameters: Record<string, unknown> }> {
+    const parseResult = queryModel.safeParse(query);
+    if (!parseResult.success) {
+      throw new InvalidRequestError(
+        `Invalid query: ${JSON.stringify(parseResult.error.issues)}`,
+      );
+    }
+
+    const parameters: Record<string, unknown> = {};
+
+    let view = this.getViewDeclaration(query.view);
+
+    // For Redshift we ignore ClickHouse-specific FINAL semantics and just use the base table.
+    const baseFrom = (view.baseCte || view.name).replace(
+      /\s+FINAL\b/i,
+      "",
+    );
+
+    // Map dimensions and metrics
+    const appliedDimensions = this.mapDimensions(query.dimensions, view);
+    const appliedMetrics = this.mapMetrics(query.metrics, view);
+
+    // Filters
+    let filterList = new FilterList(this.mapFilters(query.filters, view));
+
+    filterList = this.addStandardFilters(
+      filterList,
+      view,
+      projectId,
+      query.fromTimestamp,
+      query.toTimestamp,
+    );
+
+    // FROM + JOINs
+    let fromClause = `FROM ${baseFrom}`;
+
+    const relationTables = this.collectRelationTables(
+      view,
+      appliedDimensions,
+      appliedMetrics,
+      filterList,
+    );
+
+    if (relationTables.size > 0) {
+      const relationJoins = this.buildJoins(
+        relationTables,
+        view,
+        filterList,
+        query,
+      );
+      fromClause += ` ${relationJoins.join(" ")}`;
+    }
+
+    fromClause += this.buildWhereClause(filterList, parameters);
+
+    // Inner & outer query parts
+    const innerDimensionsPart = this.buildInnerDimensionsPart(
+      appliedDimensions,
+      query,
+      view,
+    );
+    const innerMetricsPart = this.buildInnerMetricsPart(appliedMetrics);
+
+    const innerQuery = this.buildInnerSelect(
+      view,
+      innerDimensionsPart,
+      innerMetricsPart,
+      fromClause,
+    );
+
+    const outerDimensionsPart = this.buildOuterDimensionsPart(
+      appliedDimensions,
+      !!query.timeDimension,
+    );
+    const outerMetricsPart = this.buildOuterMetricsPart(appliedMetrics);
+    const groupByClause = this.buildGroupByClause(
+      appliedDimensions,
+      !!query.timeDimension,
+    );
+
+    const processedOrderBy = this.validateAndProcessOrderBy(
+      query.orderBy,
+      appliedDimensions,
+      appliedMetrics,
+      !!query.timeDimension,
+    );
+
+    const orderByClause = this.buildOrderByClause(processedOrderBy);
+
+    const withFillClause = this.buildWithFillClause(
+      query.timeDimension,
+      query.fromTimestamp,
+      query.toTimestamp,
+      query.orderBy,
+      parameters,
+    );
+
+    const sql = this.buildOuterSelect(
+      outerDimensionsPart,
+      outerMetricsPart,
+      innerQuery,
+      groupByClause,
+      orderByClause,
+      withFillClause,
+    );
+
+    return {
+      query: sql,
+      parameters,
+    };
+  }
+}
