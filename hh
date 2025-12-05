@@ -1,5 +1,41 @@
-import { queryRedshift } from "@/src/server/redshift"; // adjust import path
-// other imports stay the same: FilterList, orderByTimeSeries, etc.
+function convertNamedToPgParams(
+  query: string,
+  namedParams: Record<string, any>,
+  startIndex = 1,
+): { query: string; params: any[] } {
+  const namesInOrder: string[] = [];
+
+  const newQuery = query.replace(
+    /\{([a-zA-Z0-9_]+):[^}]*\}/g,
+    (_match, name: string) => {
+      let idx = namesInOrder.indexOf(name);
+      if (idx === -1) {
+        namesInOrder.push(name);
+        idx = namesInOrder.length - 1;
+      }
+      return `$${startIndex + idx}`;
+    },
+  );
+
+  const params = namesInOrder.map((n) => namedParams[n]);
+  return { query: newQuery, params };
+}
+
+
+
+function redshiftBucketExpr(bucketSizeInSeconds: number, column: string): string {
+  // floor(DATEDIFF / bucket) * bucket to get the bucket start in seconds since epoch
+  // then add back to '1970-01-01'
+  return `DATEADD(
+    second,
+    FLOOR(DATEDIFF(second, TIMESTAMP '1970-01-01 00:00:00', ${column}) / ${bucketSizeInSeconds}) * ${bucketSizeInSeconds},
+    TIMESTAMP '1970-01-01 00:00:00'
+  )`;
+}
+
+
+import { queryRedshift } from "@/src/server/redshift";
+// other imports stay the same
 
 export const getObservationUsageByTypeByTime = async (
   projectId: string,
@@ -8,8 +44,9 @@ export const getObservationUsageByTypeByTime = async (
   const { envFilter, remainingFilters } =
     extractEnvironmentFilterFromFilters(filter);
 
+  // still using the existing filter builders (they return ClickHouse-style named params)
   const environmentFilter = new FilterList(
-    convertEnvFilterToClickhouseFilter(envFilter),
+    convertEnvFilterFromFilters(envFilter),
   ).apply();
 
   const chFilter = new FilterList(
@@ -29,36 +66,20 @@ export const getObservationUsageByTypeByTime = async (
       ) as DateTimeFilter | undefined)
     : undefined;
 
-  const [orderByQuery, orderByParams, bucketSizeInSeconds] = orderByTimeSeries(
-    filter,
-    "start_time",
-  );
+  // We only use the bucket size from this helper; we ignore its ORDER BY / WITH FILL
+  const [, , bucketSizeInSeconds] = orderByTimeSeries(filter, "start_time");
 
-  // ---------- REDSHIFT QUERY ----------
-  // usage_details is SUPER. We use FLATTEN to explode key/value pairs.
-  //
-  // Inner SELECT:
-  //   - bucketed start_time (via selectTimeseriesColumn)
-  //   - f.key as usage_key
-  //   - CAST(f.value AS DOUBLE PRECISION) as usage
-  //
-  // Outer SELECT:
-  //   - SUM(usage) per (start_time, usage_key)
-  //
-  // We return one row per (bucket, usage_key) and rebuild the
-  // "all keys for all buckets" grid in TS below.
-  const query = `
+  // ---------- RAW QUERY WITH CLICKHOUSE-STYLE NAMED PARAMS ----------
+  //   - we keep {paramName: Type} everywhere
+  //   - we will convert to $1, $2,… in the next step
+  const queryWithNamedParams = `
     SELECT
       start_time,
       usage_key,
       SUM(usage) AS usage_sum
     FROM (
       SELECT
-        ${selectTimeseriesColumn(
-          bucketSizeInSeconds,
-          "o.start_time",
-          "start_time",
-        )},
+        ${redshiftBucketExpr(bucketSizeInSeconds, "o.start_time")} AS start_time,
         f.key AS usage_key,
         CAST(f.value AS DOUBLE PRECISION) AS usage
       FROM
@@ -68,33 +89,41 @@ export const getObservationUsageByTypeByTime = async (
         : ""}
       CROSS JOIN LATERAL FLATTEN(input => o.usage_details) AS f
       WHERE
-        o.project_id = ?
+        o.project_id = {projectId: String}
         ${appliedFilter.query ? `AND ${appliedFilter.query}` : ""}
         ${environmentFilter.query ? `AND ${environmentFilter.query}` : ""}
         ${
           timeFilter
-            ? `AND t.timestamp >= ? - ${OBSERVATIONS_TO_TRACE_INTERVAL}`
+            ? `AND t.timestamp >= {traceTimestamp: DateTime64(3)} - ${OBSERVATIONS_TO_TRACE_INTERVAL}`
             : ""
         }
     ) AS s
     GROUP BY
       start_time,
       usage_key
-    ${orderByQuery}
+    ORDER BY start_time ASC
   `;
 
-  const params: any[] = [
+  // ---------- MERGE ALL NAMED PARAMS ----------
+  const namedParams: Record<string, any> = {
     projectId,
     ...appliedFilter.params,
     ...environmentFilter.params,
-    ...orderByParams,
-  ];
+  };
 
   if (timeFilter) {
-    // Redshift driver will accept a JS Date; if you have a helper for this,
-    // you can wrap it, e.g. convertDateToRedshiftTimestamp(timeFilter.value).
-    params.push(timeFilter.value);
+    // still fine to reuse this helper; Redshift driver just sees a JS Date / string
+    namedParams.traceTimestamp = convertDateToClickhouseDateTime(
+      timeFilter.value,
+    );
   }
+
+  // ---------- CONVERT TO PG-STYLE ($1, $2…) + PARAM ARRAY ----------
+  const { query, params } = convertNamedToPgParams(
+    queryWithNamedParams,
+    namedParams,
+    1,
+  );
 
   const result = await queryRedshift<{
     start_time: string;
@@ -111,26 +140,17 @@ export const getObservationUsageByTypeByTime = async (
     },
   });
 
-  // ---------- POST-PROCESSING ----------
-  // 1. Collect all unique usage keys.
-  // 2. Group rows by start_time → { key: sum }.
-  // 3. Produce one row per (intervalStart, key) with sum (0 if missing),
-  //    keeping the same return shape as the ClickHouse version.
-
+  // ---------- POST-PROCESSING (same logic as ClickHouse version) ----------
   const allTypes = new Set<string>();
-  const byBucket = new Map<
-    string,
-    {
-      [usageKey: string]: number;
-    }
-  >();
+  const byBucket = new Map<string, Record<string, number>>();
 
   for (const row of result) {
     allTypes.add(row.usage_key);
 
     const bucketKey = row.start_time;
     const existing = byBucket.get(bucketKey) ?? {};
-    existing[row.usage_key] = row.usage_sum != null ? Number(row.usage_sum) : 0;
+    existing[row.usage_key] =
+      row.usage_sum != null ? Number(row.usage_sum) : 0;
     byBucket.set(bucketKey, existing);
   }
 
@@ -142,7 +162,7 @@ export const getObservationUsageByTypeByTime = async (
   }[] = [];
 
   for (const [bucketStart, usageByType] of byBucket.entries()) {
-    const intervalStart = parseClickhouseUTCDateTimeFormat(bucketStart); // still OK for ISO strings
+    const intervalStart = parseClickhouseUTCDateTimeFormat(bucketStart);
     for (const type of uniqueTypes) {
       finalResult.push({
         intervalStart,
